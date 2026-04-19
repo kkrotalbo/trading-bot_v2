@@ -3,9 +3,11 @@ Trading en vivo ETH/USDT 1H — Paper Trading (registra en BD, no ejecuta órden
 ══════════════════════════════════════════════════════════════════════════════════════════
 Lee config_trading.ini para todos los parámetros.
 
-Estrategia v2 (SHORT invertido):
-  SHORT : RSI(14) entre 20 y 35  +  EMA10 < EMA55
+Estrategia v2 (inversión completa del bot v1):
+  SHORT : RSI(14) entre 20 y 35  +  EMA10 < EMA55   (donde v1 abría LONG)
   CIERRE SHORT : RSI ≥ 65  |  Take Profit 7%  |  Stop Loss 0.5%
+  LONG  : EMA10 cruza hacia abajo EMA55              (donde v1 abría SHORT)
+  CIERRE LONG  : RSI < 35  |  Stop Loss 0.5%
 
 Cuenta:
   Capital inicial  : $1,000 USDT
@@ -205,7 +207,7 @@ def print_header():
 {Style.BRIGHT}{'═'*65}
   TRADING LIVE — ETH/USDT 1H  |  Paper Trading
   Capital: ${CAPITAL_INICIAL:,.2f}  |  Por operación: ${MONTO_OP:.0f} × {LEVERAGE}x = ${MONTO_OP*LEVERAGE:.0f} exposición
-  SL: {SL_PCT*100:.1f}%  TP: {TP_PCT*100:.0f}%  SHORT cuando RSI≤{RSI_LONG_MAX}+EMA10<EMA55  Cierre RSI≥{RSI_EXIT_LONG}
+  SL: {SL_PCT*100:.1f}%  TP: {TP_PCT*100:.0f}%  [v2: LONG↔SHORT invertidos]
 {'═'*65}{Style.RESET_ALL}""")
 
 
@@ -268,7 +270,7 @@ class Cuenta:
             pnl_usdt=None, pnl_pct=None,
             saldo_acumulado=self.saldo_disponible,
             saldo_anterior=saldo_anterior,
-            razon=f"RSI={rsi:.1f} EMA10<EMA55",
+            razon=f"RSI={rsi:.1f} EMA10<EMA55" if tipo == "SHORT" else "EMA10 cruzó bajo EMA55",
         )
         print_op(operacion, precio, None, self.saldo_disponible,
                  (self.saldo_disponible - saldo_anterior) / saldo_anterior * 100, "")
@@ -349,9 +351,10 @@ def main():
             entry = cuenta.entry_price
             tipo  = cuenta.tipo_posicion
 
+            # SHORT (abierto por condición RSI): cierra con RSI≥65, TP 7%, SL 0.5%
             if tipo == "SHORT":
-                up   = (precio - entry) / entry   # sube → pérdida para SHORT
-                down = (entry - precio) / entry   # baja → ganancia para SHORT
+                up   = (precio - entry) / entry
+                down = (entry - precio) / entry
                 if up >= SL_PCT:
                     cuenta.cerrar(entry * (1 + SL_PCT), rsi, conn, fecha, "Stop Loss")
                 elif down >= TP_PCT:
@@ -359,15 +362,30 @@ def main():
                 elif rsi >= RSI_EXIT_LONG:
                     cuenta.cerrar(precio, rsi, conn, fecha, f"RSI≥{RSI_EXIT_LONG}")
 
+            # LONG (abierto por EMA cross): cierra con RSI<35, SL 0.5%
+            elif tipo == "LONG":
+                ret = (precio - entry) / entry
+                if ret <= -SL_PCT:
+                    cuenta.cerrar(entry * (1 - SL_PCT), rsi, conn, fecha, "Stop Loss")
+                elif rsi < RSI_EXIT_SHORT:
+                    cuenta.cerrar(precio, rsi, conn, fecha, f"RSI<{RSI_EXIT_SHORT}")
+
         # ── Señales de entrada ────────────────────────────────────────────
         if not cuenta.en_posicion:
 
-            # SHORT: RSI entre 20-35 y EMA10 < EMA55 (condición antigua de LONG invertida)
+            # SHORT: RSI entre 20-35 y EMA10 < EMA55 (v1 abría LONG aquí)
             if 20 <= rsi <= RSI_LONG_MAX and row["ema10_below"]:
                 if cuenta.saldo_disponible >= MONTO_OP:
                     cuenta.abrir("SHORT", precio, rsi, conn, fecha, saldo_antes)
                 else:
                     log(f"Saldo insuficiente para abrir SHORT (${cuenta.saldo_disponible:.2f})", Fore.YELLOW)
+
+            # LONG: EMA10 cruza hacia abajo EMA55 (v1 abría SHORT aquí)
+            elif row["cross_down"]:
+                if cuenta.saldo_disponible >= MONTO_OP:
+                    cuenta.abrir("LONG", precio, rsi, conn, fecha, saldo_antes)
+                else:
+                    log(f"Saldo insuficiente para abrir LONG (${cuenta.saldo_disponible:.2f})", Fore.YELLOW)
 
             else:
                 log(f"Sin señal  |  RSI={rsi:.1f}  EMA10={ema10:.2f}  EMA55={ema55:.2f}  "
