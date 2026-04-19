@@ -62,6 +62,7 @@ BINANCE_URL         = "https://api.binance.com/api/v3/klines"
 TABLE               = "eth_binance_trading_v2"
 
 print(f"[DEBUG] DB_HOST={DB_HOST!r}  DB_PORT={DB_PORT}  DB_NAME={DB_NAME!r}  DB_USER={DB_USER!r}")
+print(f"[DEBUG] ENV vars con 'DB': { {k:v for k,v in os.environ.items() if 'DB' in k.upper()} }")
 
 
 # ── Control de ejecución ──────────────────────────────────────────────────────
